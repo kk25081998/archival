@@ -1,0 +1,146 @@
+Here’s a **6-hour sprint plan** to get a working end-to-end demo of the core features. We’ll cut scope to what you can realistically ship in that window—no fancy diff tool or scheduler yet.
+
+---
+
+## Hour 1 – Project Kick-off & Scaffolding (60 min)
+
+* **Initialize repo** (monorepo or two folders: `frontend/` + `backend/`).
+* **Install**
+
+  * Backend: `express`, `axios`, `cheerio`, `cors`
+  * Frontend: React (CRA or Vite), `axios`
+* **Set up** ESLint/Prettier stub, basic `README.md` outline.
+* **Define** data layout:
+
+  ```
+  /data/
+    example.com/
+      20250702T140000Z/
+        index.html
+        assets/…
+      metadata.json
+  ```
+
+## Hour 2 – Minimal Crawler Endpoint (60 min)
+
+* **POST `/api/archive`**
+
+  * Input: `{ url }`
+  * Action:
+
+    1. Validate URL & extract hostname
+    2. Create timestamp folder under `/data/{host}/{ts}/`
+    3. Fetch root HTML (`axios`)
+    4. Parse out only `<img>`, `<link rel=stylesheet>`, `<script src>` via `cheerio`
+    5. Download each asset into `assets/` and rewrite src/href to `./assets/...`
+    6. Save modified `index.html`
+    7. Append `{ ts, urlCount }` to `/data/{host}/metadata.json`
+  * Response: `{ success: true, host, ts }`
+
+> **Note**: skip recursive link crawling—just the homepage—so it fits in the timebox.
+
+## Hour 3 – Serve Snapshots (60 min)
+
+* **Express static route**:
+
+  ```js
+  app.use(
+    "/archive/:host/:ts",
+    (req, res, next) => {
+      const dir = path.join(DATA_DIR, req.params.host, req.params.ts);
+      express.static(dir)(req, res, next);
+    }
+  );
+  ```
+* Ensure requests to `/archive/host/ts/` serve `index.html`.
+* Quick sanity test in Postman / browser.
+
+## Hour 4 – Frontend: Archive UI (60 min)
+
+* **Single-page React** with two views:
+
+  1. **Archive form**
+
+     * URL input + “Archive” button
+     * On submit: `POST /api/archive`; show spinner → success toast with link `/archive/{host}/{ts}/`
+  2. **Snapshot viewer**
+
+     * Iframe pointing at that link
+* **Routing**: React Router with routes `/` and `/view/:host/:ts`
+* Basic styling—just enough to see it work.
+
+## Hour 5 – Version List & Re-Archive (60 min)
+
+* **Backend**:
+
+  * `GET /api/archives/:host` → reads `/data/{host}/metadata.json`
+* **Frontend** on `/view/:host/:ts`
+
+  * Sidebar or dropdown listing all `ts` from `/api/archives/:host`
+  * Clicking another `ts` reloads the iframe to that timestamp.
+  * “Re-Archive” button calls `POST /api/archive` again and refreshes the list.
+
+## Hour 6 – Polish, Testing & Docs (60 min)
+
+* **Quick tests**:
+
+  * Archive a couple of small sites (e.g. parked pages)
+  * Verify assets load, switching between timestamps works.
+* **README**:
+
+  * Setup & run instructions (how to start backend + frontend).
+  * Quick usage: archive → view → re-archive.
+* **Write-up (one paragraph)**:
+
+  * Trade-offs (no recursion; file vs DB).
+  * Next steps if more time (diffs, scheduler, scaling).
+
+---
+
+### Deliverable in 6 Hours
+
+1. **Working demo** covering:
+
+   * Input URL → archive homepage assets → serve as snapshot
+   * List & switch between versions
+   * Manual “Re-Archive”
+2. **Light docs** in README
+3. **Short write-up** in the repo root
+
+With this focus you’ll have a mouthful of core functionality live in a 6 hr hackathon sprint. Good luck!
+
+
+What the above is for:
+## Overview
+
+In this take-home project, you will build an end-to-end web archiving tool similar to the Wayback Machine. Given a URL, your application should fetch that page (and related pages) and preserve them so that they can be accessed as snapshots later. 
+
+Focus on getting the core features working before adding enhancements. 
+
+### Technical Requirements
+
+**Frontend**: React
+
+**Backend**: Any stack of your choice (Node.js, Python, Java, etc.)
+
+**Data Storage**: Not required—you may work with data in memory or use simple file-based storage
+
+**Development Tools:** The user of AI code assistants is highly encouraged. You can leverage any opensource packages.
+
+### Functionality Requirements
+
+### 1. Core Functionality
+
+- Provide a UI (web page) where a user can input a URL.
+- When the user submits the URL, the system should fetch the content of that page and recursively fetch all pages it links to on the same domain. (For example, if the user archives  https:// example.com , it should also capture pages like  https://example.com/about  or  https:// example.com/contact  if those links appear on the homepage.)
+- Save the fetched content (HTML, images, stylesheets, scripts, etc.) in a way that it can be served back as a snapshot of the site at that point in time. The archived pages should include all necessary assets so that they appear and function the same as the original.
+- Maintain a record of archived versions for each website. Each time the site is archived, create an entry (e.g. in a list) with a timestamp for that capture.
+
+### 2. Versioning & Re-Archiving
+
+- Include a UI control (e.g. a button) to manually trigger a new archive of the given URL. This allows users to capture an updated snapshot on demand.
+- Provide a way in the UI to view past archives of the site. For example, show a list of timestamps for each archived version, and allow the user to select a timestamp to view that specific archived snapshot.
+
+### 4. Any Additional Creative Items
+
+Feel free to add additional items which you believe would improve this tool. For example, add a feature to compare two archived versions of a page and highlight the differences between them (show what changed from one snapshot to another) or implement an automatic scheduler (like a cron job or background service) that archives the URL on a weekly basis without manual input, keeping the archive up-to-date over time
