@@ -310,14 +310,6 @@ archival/
 └── README.md
 ```
 
-### Available Scripts
-
-- `npm run dev` - Start both frontend and backend in development mode
-- `npm run build` - Build the frontend for production
-- `npm start` - Start the backend server
-- `npm run dev:frontend` - Start only the frontend
-- `npm run dev:backend` - Start only the backend
-
 ### Expected Log Messages
 
 The following log messages are normal and don't indicate problems:
