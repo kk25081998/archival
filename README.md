@@ -324,7 +324,3 @@ The following log messages are normal and don't indicate problems:
 
 - `Failed to download asset data:...`: Data URLs (base64 embedded content) can't be downloaded
 - `Skipping potentially problematic asset`: Assets that commonly cause issues are intentionally skipped
-
-## License
-
-This project is open source and available under the MIT License.
