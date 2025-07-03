@@ -96,7 +96,7 @@ This will:
 
 ## Usage
 
-1. **Open the application** in your browser at `http://localhost`
+1. **Open the application** in your browser at `http://localhost` (docker) or `http://localhost:3000` (quick start or manual)
 
 2. **Archive a website**:
 
