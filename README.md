@@ -1,19 +1,6 @@
 # Web Archival Tool
 
-A web archiving tool similar to the Wayback Machine that allows you to capture and preserve web pages with all their assets (HTML, CSS, JavaScript, images) for later viewing.
-
-## 🚀 Features
-
-- **Async Web Page Archiving**: Capture complete websites with background job processing
-- **No Timeout Issues**: Archive jobs run independently without HTTP request timeouts
-- **Configurable Page Limits**: Archive up to 1000 pages per website (default: 100)
-- **Real-time Progress Tracking**: Live updates showing pages processed and assets downloaded
-- **Asset Preservation**: Download and store images, stylesheets, and scripts locally
-- **Version Management**: Maintain multiple snapshots of the same website
-- **Snapshot Viewer**: View archived pages in an iframe with full functionality
-- **Re-archiving**: Create new snapshots of previously archived sites
-- **Job Queue System**: Track active and completed archive jobs
-- **Modern UI**: Clean, responsive React interface with progress indicators
+A web archiving tool that allows you to capture and preserve web pages with all their assets (HTML, CSS, JavaScript, images) for later viewing.
 
 ## Tech Stack
 
@@ -107,11 +94,9 @@ This will:
 - Rebuild them with your latest code changes
 - Start the updated containers in detached mode
 
-Enjoy your beautifully redesigned web archival tool! 🌟
-
 ## Usage
 
-1. **Open the application** in your browser at `http://localhost:3000`
+1. **Open the application** in your browser at `http://localhost`
 
 2. **Archive a website**:
 
@@ -332,77 +317,6 @@ archival/
 - `npm start` - Start the backend server
 - `npm run dev:frontend` - Start only the frontend
 - `npm run dev:backend` - Start only the backend
-
-### Testing the Async System
-
-Use the included test script to verify async functionality:
-
-```bash
-node test-async-archive.js
-```
-
-This will:
-
-- Start a test archive job
-- Monitor progress in real-time
-- Display completion status
-- Show job management capabilities
-
-## Limitations & Trade-offs
-
-### Current Limitations
-
-- **File-based storage**: Not suitable for large-scale production use
-- **In-memory job queue**: Jobs are lost on server restart
-- **No authentication**: No user management or access controls
-- **Limited asset types**: Focuses on images, CSS, and JavaScript files
-
-### Design Decisions
-
-- **File storage over database**: Simpler setup, no database configuration required
-- **In-memory job queue**: Fast processing without external dependencies
-- **Async processing**: Eliminates timeout issues for large websites
-- **Local asset rewriting**: Ensures archived pages work offline
-- **Timestamp-based versioning**: Simple and effective for version management
-
-## Future Enhancements
-
-If you have more time, consider implementing:
-
-1. **Persistent job queue**: Use Redis or database for job persistence
-2. **Database storage**: Use PostgreSQL or MongoDB for better scalability
-3. **User authentication**: Add user accounts and access controls
-4. **Scheduled archiving**: Automatic periodic archiving with cron jobs
-5. **Diff tool**: Compare changes between different snapshots
-6. **Search functionality**: Search through archived content
-7. **API rate limiting**: Prevent abuse and ensure fair usage
-8. **Compression**: Compress archived files to save storage space
-9. **WebSocket notifications**: Real-time progress updates without polling
-10. **Distributed processing**: Scale across multiple servers
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Port conflicts**: If ports 3000 or 3001 are in use, modify the port in the respective config files
-2. **CORS errors**: The backend includes CORS middleware, but ensure the frontend is making requests to the correct backend URL
-3. **Asset download failures**: Some websites may block automated requests or have broken asset links (these are logged but don't stop the job)
-4. **Job not progressing**: Check the backend logs for detailed error messages
-5. **Memory usage**: Large websites with many assets may consume significant memory
-
-### Debug Mode
-
-To enable more verbose logging, add `DEBUG=*` to your environment variables:
-
-```bash
-DEBUG=* npm run dev
-```
-
-### Job Management
-
-- **View active jobs**: `GET /api/jobs`
-- **Check job status**: `GET /api/jobs/:jobId`
-- **Monitor backend logs**: Jobs log progress and errors with job IDs for easy tracking
 
 ### Expected Log Messages
 
