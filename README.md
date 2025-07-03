@@ -67,6 +67,43 @@ npm install
 npm run dev
 ```
 
+### Docker Setup (Recommended for Production)
+
+For a production-ready setup using Docker:
+
+1. **Build and start the containers**:
+
+   ```bash
+   docker-compose up --build -d
+   ```
+
+2. **Access the application**:
+
+   - Frontend: `http://localhost` (port 80)
+   - Backend API: `http://localhost:3001`
+
+3. **Stop the containers**:
+   ```bash
+   docker-compose down
+   ```
+
+## 💡 For Future Updates
+
+Whenever you make code changes, just run:
+
+```bash
+docker-compose down
+docker-compose up --build -d
+```
+
+This will:
+
+- Stop the existing containers
+- Rebuild them with your latest code changes
+- Start the updated containers in detached mode
+
+Enjoy your beautifully redesigned web archival tool! 🌟
+
 ## Usage
 
 1. **Open the application** in your browser at `http://localhost:3000`
