@@ -186,6 +186,11 @@ app.post('/api/archive', async (req, res) => {
   }
 });
 
+// Health check endpoint for Docker
+app.get('/api/archives/health', (req, res) => {
+  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
 // Get archives for a host
 app.get('/api/archives/:host', async (req, res) => {
   try {
