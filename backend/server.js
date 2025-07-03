@@ -5,10 +5,23 @@ const fs = require('fs-extra');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const URLParse = require('url-parse');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATA_DIR = path.join(__dirname, 'data');
+
+// Job queue system
+const activeJobs = new Map();
+const jobHistory = new Map();
+
+// Job status constants
+const JOB_STATUS = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+  FAILED: 'failed'
+};
 
 // Middleware
 app.use(cors());
@@ -17,11 +30,11 @@ app.use(express.json());
 // Ensure data directory exists
 fs.ensureDirSync(DATA_DIR);
 
-// Archive endpoint
+// Start archive job (async)
 app.post('/api/archive', async (req, res) => {
   try {
     console.log('Archive request received:', req.body);
-    const { url } = req.body;
+    const { url, maxPages } = req.body;
     
     if (!url) {
       console.log('No URL provided');
@@ -36,6 +49,106 @@ app.post('/api/archive', async (req, res) => {
       return res.status(400).json({ error: 'Invalid URL' });
     }
 
+    // Create job
+    const jobId = uuidv4();
+    const job = {
+      id: jobId,
+      url: url,
+      hostname: parsedUrl.hostname,
+      status: JOB_STATUS.PENDING,
+      maxPages: maxPages || 100, // Default to 100 pages, no more limit of 20
+      createdAt: new Date(),
+      startedAt: null,
+      completedAt: null,
+      progress: {
+        pagesProcessed: 0,
+        assetsDownloaded: 0,
+        currentPage: null
+      },
+      result: null,
+      error: null
+    };
+
+    activeJobs.set(jobId, job);
+    
+    // Start processing in background
+    processArchiveJob(jobId);
+    
+    // Return immediately with job ID
+    res.json({
+      success: true,
+      jobId: jobId,
+      status: JOB_STATUS.PENDING,
+      message: 'Archive job started. Use /api/jobs/:jobId to check progress.'
+    });
+
+  } catch (error) {
+    console.error('Archive job creation error:', error);
+    res.status(500).json({ error: 'Failed to create archive job' });
+  }
+});
+
+// Get job status
+app.get('/api/jobs/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    
+    const job = activeJobs.get(jobId) || jobHistory.get(jobId);
+    
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    res.json({
+      id: job.id,
+      status: job.status,
+      progress: job.progress,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+      result: job.result,
+      error: job.error
+    });
+    
+  } catch (error) {
+    console.error('Get job status error:', error);
+    res.status(500).json({ error: 'Failed to get job status' });
+  }
+});
+
+// Get all active jobs
+app.get('/api/jobs', async (req, res) => {
+  try {
+    const jobs = Array.from(activeJobs.values()).map(job => ({
+      id: job.id,
+      url: job.url,
+      hostname: job.hostname,
+      status: job.status,
+      progress: job.progress,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt
+    }));
+    
+    res.json(jobs);
+    
+  } catch (error) {
+    console.error('Get jobs error:', error);
+    res.status(500).json({ error: 'Failed to get jobs' });
+  }
+});
+
+// Background job processor
+async function processArchiveJob(jobId) {
+  const job = activeJobs.get(jobId);
+  if (!job) return;
+  
+  try {
+    job.status = JOB_STATUS.RUNNING;
+    job.startedAt = new Date();
+    
+    console.log(`Starting archive job ${jobId} for ${job.url}`);
+    
+    const parsedUrl = new URLParse(job.url);
     const hostname = parsedUrl.hostname;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const archiveDir = path.join(DATA_DIR, hostname, timestamp);
@@ -49,7 +162,7 @@ app.post('/api/archive', async (req, res) => {
     const visited = new Set();
     let assetCount = 0;
     let pageCount = 0;
-    const maxPages = 20;
+    const maxPages = job.maxPages;
     const baseUrl = `${parsedUrl.protocol}//${parsedUrl.hostname}`;
 
     async function crawlPage(pageUrl, relPath = 'index.html') {
@@ -59,13 +172,18 @@ app.post('/api/archive', async (req, res) => {
       visited.add(normalizedUrl);
       pageCount++;
       
+      // Update job progress
+      job.progress.pagesProcessed = pageCount;
+      job.progress.assetsDownloaded = assetCount;
+      job.progress.currentPage = pageUrl;
+      
       // Progress logging
-      console.log(`[${pageCount}/${maxPages}] Crawling: ${pageUrl}`);
-      console.log(`Assets downloaded so far: ${assetCount}`);
+      console.log(`[Job ${jobId}] [${pageCount}/${maxPages}] Crawling: ${pageUrl}`);
+      console.log(`[Job ${jobId}] Assets downloaded so far: ${assetCount}`);
       
       try {
         const response = await axios.get(pageUrl, {
-          timeout: 60000, // Increased timeout for larger pages
+          timeout: 60000,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
           }
@@ -81,26 +199,25 @@ app.post('/api/archive', async (req, res) => {
           const elem = $('img').eq(i);
           const src = elem.attr('src');
           if (src && !downloadedAssets.has(src)) {
-            // Skip heavy assets that commonly timeout
             const skipPatterns = [
-              /\.mp4$/i, /\.webm$/i, /\.pdf$/i, /\.zip$/i,  // Large files
-              /fonts\.googleapis\.com/i,                    // Often slow
-              /analytics/i, /tracking/i, /gtag/i,           // Analytics scripts
-              /\.svg\?/i,                                   // SVG with query params (often dynamic)
-              /data:image/i                                 // Data URLs (already embedded)
+              /\.mp4$/i, /\.webm$/i, /\.pdf$/i, /\.zip$/i,
+              /fonts\.googleapis\.com/i,
+              /analytics/i, /tracking/i, /gtag/i,
+              /\.svg\?/i,
+              /data:image/i
             ];
             
             const shouldSkip = skipPatterns.some(pattern => pattern.test(src));
             if (shouldSkip) {
-              console.log(`Skipping potentially problematic asset: ${src}`);
+              console.log(`[Job ${jobId}] Skipping potentially problematic asset: ${src}`);
               continue;
             }
             
             downloadedAssets.add(src);
             assetCount++;
+            job.progress.assetsDownloaded = assetCount;
             await downloadAsset(src, assetsDir, baseUrl, elem, 'src');
-            // Small delay to prevent overwhelming system
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 100)); // Reduced delay
           }
         }
         
@@ -109,24 +226,24 @@ app.post('/api/archive', async (req, res) => {
           const elem = $('link[rel="stylesheet"]').eq(i);
           const href = elem.attr('href');
           if (href && !downloadedAssets.has(href)) {
-            // Skip heavy assets that commonly timeout
             const skipPatterns = [
-              /fonts\.googleapis\.com/i,                    // Often slow
-              /analytics/i, /tracking/i, /gtag/i,           // Analytics scripts
-              /\.css\?v=\d+/i,                             // Versioned CSS (often dynamic)
-              /cdn\.jsdelivr\.net.*bootstrap/i             // Large CSS frameworks
+              /fonts\.googleapis\.com/i,
+              /analytics/i, /tracking/i, /gtag/i,
+              /\.css\?v=\d+/i,
+              /cdn\.jsdelivr\.net.*bootstrap/i
             ];
             
             const shouldSkip = skipPatterns.some(pattern => pattern.test(href));
             if (shouldSkip) {
-              console.log(`Skipping potentially problematic stylesheet: ${href}`);
+              console.log(`[Job ${jobId}] Skipping potentially problematic stylesheet: ${href}`);
               continue;
             }
             
             downloadedAssets.add(href);
             assetCount++;
+            job.progress.assetsDownloaded = assetCount;
             await downloadAsset(href, assetsDir, baseUrl, elem, 'href');
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
         
@@ -135,26 +252,26 @@ app.post('/api/archive', async (req, res) => {
           const elem = $('script[src]').eq(i);
           const src = elem.attr('src');
           if (src && !downloadedAssets.has(src)) {
-            // Skip heavy assets that commonly timeout
             const skipPatterns = [
-              /analytics/i, /tracking/i, /gtag/i, /gtm/i,   // Analytics scripts
-              /facebook\.net/i, /twitter\.com/i,            // Social media scripts
-              /googleapis\.com.*analytics/i,                // Google Analytics
-              /\.js\?v=\d+/i,                              // Versioned JS (often dynamic)
-              /recaptcha/i, /captcha/i,                    // Captcha scripts
-              /ads/i, /doubleclick/i                       // Ad scripts
+              /analytics/i, /tracking/i, /gtag/i, /gtm/i,
+              /facebook\.net/i, /twitter\.com/i,
+              /googleapis\.com.*analytics/i,
+              /\.js\?v=\d+/i,
+              /recaptcha/i, /captcha/i,
+              /ads/i, /doubleclick/i
             ];
             
             const shouldSkip = skipPatterns.some(pattern => pattern.test(src));
             if (shouldSkip) {
-              console.log(`Skipping potentially problematic script: ${src}`);
+              console.log(`[Job ${jobId}] Skipping potentially problematic script: ${src}`);
               continue;
             }
             
             downloadedAssets.add(src);
             assetCount++;
+            job.progress.assetsDownloaded = assetCount;
             await downloadAsset(src, assetsDir, baseUrl, elem, 'src');
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
         
@@ -162,16 +279,14 @@ app.post('/api/archive', async (req, res) => {
         const savePath = path.join(archiveDir, relPath);
         await fs.ensureDir(path.dirname(savePath));
         await fs.writeFile(savePath, $.html());
-        console.log(`✅ Saved page: ${relPath} (${$.html().length} bytes)`);
+        console.log(`[Job ${jobId}] ✅ Saved page: ${relPath} (${$.html().length} bytes)`);
         
         // Find and crawl same-domain links
         const links = new Set();
         $('a[href]').each((i, elem) => {
           let href = $(elem).attr('href');
           if (!href) return;
-          // Ignore mailto, tel, javascript, etc.
           if (/^(mailto:|tel:|javascript:|#)/i.test(href)) return;
-          // Normalize
           if (href.startsWith('//')) {
             href = `${parsedUrl.protocol}${href}`;
           } else if (href.startsWith('/')) {
@@ -181,7 +296,6 @@ app.post('/api/archive', async (req, res) => {
           }
           const linkUrl = new URLParse(href);
           if (linkUrl.hostname === hostname) {
-            // Compute relative path for saving
             let linkRelPath = linkUrl.pathname.replace(/^\//, '');
             if (!linkRelPath || linkRelPath.endsWith('/')) linkRelPath += 'index.html';
             else if (!linkRelPath.endsWith('.html')) linkRelPath += '.html';
@@ -189,20 +303,18 @@ app.post('/api/archive', async (req, res) => {
           }
         });
         
-        // Crawl links with delay to prevent overwhelming
+        // Crawl links with reduced delay
         for (const [nextUrl, nextRelPath] of links) {
           if (visited.size >= maxPages) break;
           await crawlPage(nextUrl, nextRelPath);
-          // Delay between page crawls
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 500)); // Reduced delay
         }
       } catch (err) {
-        // Improved error logging
-        console.error(`Failed to crawl ${pageUrl}:`, err);
+        console.error(`[Job ${jobId}] Failed to crawl ${pageUrl}:`, err);
       }
     }
 
-    await crawlPage(url, 'index.html');
+    await crawlPage(job.url, 'index.html');
 
     // Update metadata
     const metadataPath = path.join(DATA_DIR, hostname, 'metadata.json');
@@ -212,30 +324,41 @@ app.post('/api/archive', async (req, res) => {
     }
     metadata.push({
       timestamp,
-      url: url,
+      url: job.url,
       assetCount,
       pageCount,
       createdAt: new Date().toISOString()
     });
     await fs.writeJson(metadataPath, metadata, { spaces: 2 });
 
-    res.json({
-      success: true,
+    // Job completed successfully
+    job.status = JOB_STATUS.COMPLETED;
+    job.completedAt = new Date();
+    job.result = {
       host: hostname,
       timestamp,
       assetCount,
       pageCount
-    });
+    };
+    
+    console.log(`[Job ${jobId}] ✅ Archive job completed successfully`);
+    
+    // Move to history and remove from active jobs
+    jobHistory.set(jobId, job);
+    activeJobs.delete(jobId);
 
   } catch (error) {
-    // Improved error logging
-    console.error('Archive error:', error);
-    if (error && error.stack) {
-      console.error('Stack trace:', error.stack);
-    }
-    res.status(500).json({ error: 'Failed to archive URL' });
+    console.error(`[Job ${jobId}] ❌ Archive job failed:`, error);
+    
+    job.status = JOB_STATUS.FAILED;
+    job.completedAt = new Date();
+    job.error = error.message;
+    
+    // Move to history and remove from active jobs
+    jobHistory.set(jobId, job);
+    activeJobs.delete(jobId);
   }
-});
+}
 
 // Health check endpoint for Docker
 app.get('/api/archives/health', (req, res) => {

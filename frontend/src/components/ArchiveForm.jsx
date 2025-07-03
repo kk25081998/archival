@@ -4,16 +4,28 @@ import axios from 'axios'
 
 function ArchiveForm() {
   const [url, setUrl] = useState('')
+  const [maxPages, setMaxPages] = useState(100)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [archivedWebsites, setArchivedWebsites] = useState([])
   const [loadingWebsites, setLoadingWebsites] = useState(true)
+  const [currentJob, setCurrentJob] = useState(null)
+  const [jobPollingInterval, setJobPollingInterval] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     fetchArchivedWebsites()
   }, [])
+
+  useEffect(() => {
+    // Cleanup polling on unmount
+    return () => {
+      if (jobPollingInterval) {
+        clearInterval(jobPollingInterval)
+      }
+    }
+  }, [jobPollingInterval])
 
   const fetchArchivedWebsites = async () => {
     try {
@@ -23,6 +35,59 @@ function ArchiveForm() {
       console.error('Failed to fetch archived websites:', err)
     } finally {
       setLoadingWebsites(false)
+    }
+  }
+
+  const pollJobStatus = async (jobId) => {
+    try {
+      const response = await axios.get(`/api/jobs/${jobId}`)
+      const job = response.data
+      
+      setCurrentJob(job)
+      
+      if (job.status === 'completed') {
+        setSuccess(`Successfully archived! ${job.result.assetCount} assets downloaded, ${job.result.pageCount} pages crawled.`)
+        setLoading(false)
+        setUrl('')
+        setCurrentJob(null)
+        
+        // Clear polling
+        if (jobPollingInterval) {
+          clearInterval(jobPollingInterval)
+          setJobPollingInterval(null)
+        }
+        
+        // Refresh the archived websites list
+        fetchArchivedWebsites()
+        
+        // Navigate to the snapshot viewer after a short delay
+        setTimeout(() => {
+          navigate(`/view/${job.result.host}/${job.result.timestamp}`)
+        }, 2000)
+        
+      } else if (job.status === 'failed') {
+        setError(`Archive job failed: ${job.error}`)
+        setLoading(false)
+        setCurrentJob(null)
+        
+        // Clear polling
+        if (jobPollingInterval) {
+          clearInterval(jobPollingInterval)
+          setJobPollingInterval(null)
+        }
+      }
+      
+    } catch (err) {
+      console.error('Failed to poll job status:', err)
+      setError('Failed to get job status')
+      setLoading(false)
+      setCurrentJob(null)
+      
+      // Clear polling
+      if (jobPollingInterval) {
+        clearInterval(jobPollingInterval)
+        setJobPollingInterval(null)
+      }
     }
   }
 
@@ -37,25 +102,34 @@ function ArchiveForm() {
     setLoading(true)
     setError('')
     setSuccess('')
+    setCurrentJob(null)
 
     try {
-      const response = await axios.post('/api/archive', { url: url.trim() })
+      const response = await axios.post('/api/archive', { 
+        url: url.trim(),
+        maxPages: maxPages
+      })
       
       if (response.data.success) {
-        setSuccess(`Successfully archived! ${response.data.assetCount} assets downloaded.`)
-        setUrl('')
+        const jobId = response.data.jobId
+        setCurrentJob({ 
+          id: jobId, 
+          status: 'pending', 
+          progress: { pagesProcessed: 0, assetsDownloaded: 0, currentPage: null } 
+        })
         
-        // Refresh the archived websites list
-        fetchArchivedWebsites()
+        // Start polling for job status
+        const interval = setInterval(() => {
+          pollJobStatus(jobId)
+        }, 2000) // Poll every 2 seconds
         
-        // Navigate to the snapshot viewer after a short delay
-        setTimeout(() => {
-          navigate(`/view/${response.data.host}/${response.data.timestamp}`)
-        }, 2000)
+        setJobPollingInterval(interval)
+        
+        // Initial poll
+        pollJobStatus(jobId)
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to archive URL. Please try again.')
-    } finally {
+      setError(err.response?.data?.error || 'Failed to start archive job. Please try again.')
       setLoading(false)
     }
   }
@@ -71,6 +145,23 @@ function ArchiveForm() {
 
   const handleWebsiteClick = (website) => {
     navigate(`/view/${website.host}/${website.latestArchive.timestamp}`)
+  }
+
+  const getJobStatusMessage = () => {
+    if (!currentJob) return ''
+    
+    switch (currentJob.status) {
+      case 'pending':
+        return 'Starting archive job...'
+      case 'running':
+        return `Processing: ${currentJob.progress.pagesProcessed} pages, ${currentJob.progress.assetsDownloaded} assets downloaded`
+      case 'completed':
+        return 'Archive completed!'
+      case 'failed':
+        return 'Archive failed'
+      default:
+        return 'Unknown status'
+    }
   }
 
   return (
@@ -103,6 +194,20 @@ function ArchiveForm() {
           />
         </div>
         
+        <div className="form-group">
+          <label htmlFor="maxPages">Maximum Pages to Archive</label>
+          <input
+            type="number"
+            id="maxPages"
+            value={maxPages}
+            onChange={(e) => setMaxPages(Math.max(1, parseInt(e.target.value) || 100))}
+            min="1"
+            max="1000"
+            disabled={loading}
+          />
+          <small>Default: 100 pages (increased from previous limit of 20)</small>
+        </div>
+        
         <button 
           type="submit" 
           className="btn-primary"
@@ -118,6 +223,53 @@ function ArchiveForm() {
           )}
         </button>
       </form>
+
+      {/* Job Progress */}
+      {currentJob && (
+        <div className="job-progress" style={{ 
+          marginTop: 'var(--space-4)', 
+          padding: 'var(--space-4)', 
+          backgroundColor: 'var(--gray-50)', 
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--gray-200)'
+        }}>
+          <h4 style={{ margin: '0 0 var(--space-2) 0' }}>Archive Progress</h4>
+          <div className="job-status" style={{ marginBottom: 'var(--space-2)' }}>
+            <strong>Status:</strong> {getJobStatusMessage()}
+          </div>
+          
+          {currentJob.progress && currentJob.progress.currentPage && (
+            <div className="current-page" style={{ 
+              fontSize: '0.9em', 
+              opacity: 0.8,
+              marginBottom: 'var(--space-2)',
+              wordBreak: 'break-all'
+            }}>
+              <strong>Current:</strong> {currentJob.progress.currentPage}
+            </div>
+          )}
+          
+          {currentJob.status === 'running' && (
+            <div className="progress-bar" style={{ 
+              width: '100%', 
+              height: '8px', 
+              backgroundColor: 'var(--gray-200)', 
+              borderRadius: '4px',
+              overflow: 'hidden'
+            }}>
+              <div 
+                className="progress-fill" 
+                style={{
+                  width: `${Math.min(100, (currentJob.progress.pagesProcessed / maxPages) * 100)}%`,
+                  height: '100%',
+                  backgroundColor: 'var(--primary-500)',
+                  transition: 'width 0.3s ease'
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Previously Archived Websites */}
       <div style={{ marginTop: 'var(--space-8)', paddingTop: 'var(--space-6)', borderTop: '1px solid var(--gray-200)' }}>
